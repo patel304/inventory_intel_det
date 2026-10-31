@@ -25,10 +25,25 @@ from app.services.investigation_service import (
     get_investigation_events,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.models import Store, SKU, Investigation
+
 app = FastAPI(
     title="Inventory Shrinkage Detection API",
     description="Backend API for retail inventory monitoring and shrinkage detection",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
@@ -147,6 +162,17 @@ def list_alerts(
 class InvestigationRequest(BaseModel):
     alert_id: int
     assigned_to: Optional[str] = None
+
+
+
+@app.get("/investigations")
+def list_investigations(db: Session = Depends(get_db)):
+    investigations = (
+        db.query(Investigation)
+        .order_by(Investigation.created_at.desc())
+        .all()
+    )
+    return investigations
 
 
 @app.post("/investigations")

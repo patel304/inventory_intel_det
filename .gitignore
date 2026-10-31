@@ -1,0 +1,29 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Generated datasets and model outputs
+backend/data/generated/
+*.joblib
+*.pkl
+
+# Frontend
+node_modules/
+dist/
+build/
+
+# IDE and OS
+.vscode/
+.DS_Store
