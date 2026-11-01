@@ -1,231 +1,282 @@
-# StockGuard Project Audit
+StockGuard – Inventory Shrinkage Detection System
 
-**Audit date:** 2026-10-31  
-**Branch:** `main` @ `d26bb9c` (working tree was clean at audit start)  
-**Method:** Source inspection, documentation review, and read-only MySQL queries. No records were modified.
+**YottaFlex AI Candidate Project**
 
-Status legend used below:
+StockGuard is an inventory shrinkage detection system designed to identify unusual stock losses by comparing calculated expected inventory with physical cycle-count quantities. It combines inventory movement processing, rule-based shortage detection, machine-learning anomaly detection, alert management, and investigation workflows.
 
-| Status | Meaning |
-| --- | --- |
-| Implemented | Code exists and matches the intended design |
-| Tested and working | Exercised against the live database or passing automated tests |
-| Implemented but untested | Code exists; no automated test and not verified in this audit |
-| Partially implemented | Core path exists; important cases missing |
-| Missing | Required for the product, not present |
-| Broken | Incorrect, unsafe, or will fail in normal use |
+> **Project status:** Core application workflows have been implemented and manually verified during development. Some technical and evaluation limitations are documented below. This is a local demonstration project, not a production-hardened inventory platform.
+
+## 1. Business Problem
+
+Retail businesses record inventory changes through receipts, sales, transfers, damage and other adjustments. Differences between expected stock and physical counts can indicate shrinkage or operational discrepancies.
+
+StockGuard aims to:
+- Calculate expected stock for a store and SKU.
+- Compare expected stock with the latest physical cycle count.
+- Identify potential shortages and surface them as alerts.
+- Support investigation of detected alerts.
+- Provide dashboard and model-performance views.
+
+## 2. Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React, Vite, Tailwind CSS |
+| Backend | Python, FastAPI |
+| ORM / database access | SQLAlchemy |
+| Database | MySQL |
+| Database migrations | Alembic |
+| Anomaly detection | scikit-learn Isolation Forest |
+| Data processing | Python, Pandas |
+| API testing | Postman / HTTP requests |
+
+Use the dependency files in the repository as the source of truth for exact versions.
+
+## 3. Dataset
+
+The development database was populated with the following synthetic dataset:
+
+| Entity | Records |
+|---|---:|
+| Stores | 100 |
+| SKUs | 5,000 |
+| Inventory movements | 1,000,000 |
+| Cycle counts | 20,000 |
+
+The audited database also recorded 1,994 shrinkage-labelled cycle counts in the generated ground-truth data. These are synthetic labels and should not be interpreted as real-world shrinkage prevalence.
+
+The audited dataset includes opening balances, sales, receipts, damage, transfers out and transfers in. The audit did not find populated adjustment or return movement rows. Do not assume those scenarios have been validated with populated data.
+
+**Important:** Preserve the existing generated dataset. Do not run data-generation or reset commands against the populated database unless you have backed it up and explicitly intend to replace it.
+
+## 4. Main Features
+
+The application includes these user-facing areas:
+
+- **Dashboard:** Summary view of shrinkage and alert information.
+- **Stores:** Store listing.
+- **Products / SKUs:** SKU catalog and search.
+- **Inventory Lookup:** Look up expected stock and latest cycle-count information using a Store ID and SKU ID.
+- **Shrinkage Alerts:** View and search shrinkage alerts.
+- **Investigations:** Review and update investigation findings, resolution and status.
+- **Model Performance:** View detection-model performance information.
+- **System Health:** View application health information.
+
+The inventory lookup API was manually verified using Store ID `11` and SKU ID `201`. It returned HTTP 200 with the store code, SKU code, expected stock and latest cycle count. The frontend lookup was subsequently tested successfully.
+
+The investigation save/update workflow and alert-search focus behaviour were also manually tested after fixes.
+
+## 5. Inventory and Detection Concepts
+
+### Expected stock and variance
+
+The system calculates expected inventory from recorded inventory movements and compares it with a physical cycle count.
+
+Conceptually:
+
+```text
+Expected Stock = Opening Stock + Stock Increases - Stock Decreases
+
+Variance = Counted Quantity - Expected Stock
+```
+
+The exact movement sign rules are implemented in backend services. The project audit identified duplicated movement-sign logic and noted that adjustment handling and historical `as_of` calculations need further consistency work.
+
+Do not treat the simplified equation above as proof that every movement type or historical scenario is fully supported.
+
+### Rule-based detection
+
+The audited detection implementation includes a shortage threshold rule. The audit recorded a shortage threshold of 5 units. Its suitability depends on business context, SKU value, expected volume and operational policy.
+
+### Isolation Forest
+
+The project includes an Isolation Forest anomaly-detection approach. The project audit identified an evaluation limitation: the model was fitted and scored on the same rows rather than on a separate hold-out set. It also noted that synthetic labels were generated using shortage-related quantities that overlap with model features. Consequently, reported performance can be optimistic and must not be presented as evidence of real-world predictive accuracy.
+
+A proper independent evaluation should use a separate hold-out dataset and document the split, features, label-generation process and limitations.
+
+## 6. Application Architecture
+
+```text
+                  React + Vite Frontend
+                           |
+                           | HTTP / JSON
+                           v
+                     FastAPI Backend
+                           |
+             +-------------+-------------+
+             |             |             |
+             v             v             v
+       Inventory       Alerts &     Detection / ML
+       Services      Investigations   Services
+             |             |             |
+             +-------------+-------------+
+                           |
+                           v
+                      MySQL Database
+                           |
+                    SQLAlchemy ORM
+                           |
+                    Alembic Migrations
+```
+
+The frontend communicates with the FastAPI backend over HTTP. The backend uses SQLAlchemy to access MySQL, while Alembic manages database schema migrations.
+
+## 7. Running the Project Locally
+
+The commands below are a general local-development outline. Check the actual repository files and environment variables before running them.
+
+### Prerequisites
+
+- Python version compatible with `backend/requirements.txt`
+- Node.js and npm compatible with the frontend project
+- MySQL server
+- Git
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Configure the database connection using the environment variables expected by the backend. Do not commit your real `.env` file.
+
+Start the API using the entry point configured in the project. For the usual FastAPI layout, this may be:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+If the project is configured differently, follow its actual entry point.
+
+### Frontend
+
+In a separate terminal:
+
+```bash
+cd frontend
+npm install
+```
+
+If the application uses a frontend environment file, configure its API base URL:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Start the frontend:
+
+```bash
+npm run dev
+```
+
+Build and lint checks:
+
+```bash
+npm run lint
+npm run build
+```
+
+## 8. API Verification
+
+The following inventory lookup endpoint was verified against the running local backend:
+
+```http
+GET /inventory/lookup?store_id=11&sku_id=201
+```
+
+Example response shape:
+
+```json
+{
+  "store_id": 11,
+  "store_code": "STORE-000001",
+  "sku_id": 201,
+  "sku_code": "SKU-000001",
+  "expected_stock": "115.000",
+  "latest_cycle_count": {
+    "id": 1182,
+    "count_code": "CNT-2026-000182",
+    "counted_quantity": "108.000",
+    "counted_at": "2026-03-29T18:13:00"
+  }
+}
+```
+
+This is a recorded local-development example, not a guarantee that the same values will exist in another database.
+
+When enabled, FastAPI's interactive API documentation is normally available at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Use the running API's OpenAPI page as the authoritative list of routes and request schemas.
+
+## 9. Verification Performed
+
+The following checks were recorded during development:
+
+- Frontend ESLint completed with no errors and one React Hook dependency warning.
+- Vite production build completed successfully.
+- Store and SKU listing endpoints returned populated records.
+- Inventory lookup returned HTTP 200 for Store ID 11 and SKU ID 201.
+- Frontend Inventory Lookup was tested successfully with those IDs.
+- Investigation save/update and Shrinkage Alerts search-focus issues were fixed and manually verified.
+
+These are development checks, not a claim that the application has a complete automated test suite.
+
+## 10. Known Limitations and Further Work
+
+The project audit identified the following areas for further improvement. Re-check the current source before treating each item as still outstanding, because development continued after the audit.
+
+1. Unify movement-sign rules across inventory calculation, detection and data generation.
+2. Add consistent historical expected-stock calculation using an `as_of` or cycle-count timestamp where required.
+3. Validate adjustment and return movement handling with populated test data.
+4. Add duplicate-alert protection and robust alert identifiers.
+5. Add duplicate-investigation protection and synchronize alert status when an investigation is resolved or closed.
+6. Add pagination and consistent response schemas to collection endpoints where needed.
+7. Evaluate Isolation Forest on a separate hold-out dataset and document honest metrics.
+8. Add focused automated tests for calculation, detection and investigation workflows.
+9. Improve configuration validation, logging, error handling and production security before any real deployment.
+
+Authentication and authorization were not implemented in the audited version. Treat the application as a local demonstration unless appropriate access controls and operational safeguards are added.
+
+## 11. Data Safety and Configuration
+
+- Never commit `.env`, passwords, API keys or database credentials.
+- Keep generated/private data out of the public repository unless it is safe and intended for publication.
+- Provide `.env.example` with placeholder values only.
+- Do not publish personal or sensitive information.
+- Back up the local database before any destructive migration or data-generation operation.
+
+## 12. AI Assistance Disclosure
+
+AI tools were used for development assistance, technical guidance, debugging and documentation support. The candidate is responsible for reviewing the implementation, validating results, understanding design decisions and explaining known limitations.
+
+The accompanying `docs/AI_PROMPT_HISTORY.md` records project-related prompts available from retained conversation records. Supplement it with prompts from other AI tools where applicable. Do not represent it as a complete verbatim export if those records are unavailable.
+
+## 13. Repository Contents
+
+The repository should contain the actual backend and frontend source, database migration files, dependency manifests, safe configuration examples, documentation and relevant supporting artifacts.
+
+Suggested supporting documents:
+
+```text
+README.md
+docs/
+  architecture.md
+  AI_PROMPT_HISTORY.md
+  PROJECT_AUDIT.md
+  screenshots/
+.env.example
+.gitignore
+```
+
+Only include files that exist and are relevant. Keep credentials, private datasets and local environment files out of the public repository.
 
 ---
 
-## 1. Verified live database (read-only)
-
-| Table | Row count | Notes |
-| --- | --- | --- |
-| stores | 100 | Matches stated full dataset |
-| skus | 5,000 | Matches stated full dataset |
-| inventory_movements | 1,000,000 | Preserved; do not regenerate |
-| cycle_counts | 20,000 | Preserved |
-| employee_roles | 4 | |
-| shifts | 2 | |
-| shrinkage_alerts | 1,994 | All have `cycle_count_id` and expected/observed/variance |
-| investigations | 2 | Both `IN_PROGRESS` |
-| investigation_events | 2 | |
-| returns | 0 | Table exists, unused |
-| promotions | 0 | Table exists, unused |
-| promotion_skus | 0 | Table exists, unused |
-| alembic_version | 1 | Single migration `6c8916762d8e` |
-
-Movement type mix (live):
-
-- OPENING_BALANCE 500,000
-- SALE 249,789
-- RECEIPT 114,159
-- DAMAGE 45,370
-- TRANSFER_OUT 45,341
-- TRANSFER_IN 45,341
-
-No `ADJUSTMENT_IN` / `ADJUSTMENT_OUT` / `RETURN_IN` rows exist in the current dataset.
-
-Read-only integrity samples:
-
-- Transfer groups with unmatched IN/OUT counts: **0**
-- Negative movement quantities: **0**
-- Alerts with NULL expected quantity: **0**
-- Alerts with NULL cycle_count_id: **0**
-- Duplicate `count_code` in `ground_truth.csv`: **0**
-- Ground-truth rows: **20,000**; shrinkage labels: **1,994**
-
-Ground truth file present at `backend/data/generated/ground_truth.csv` (gitignored). **Do not overwrite.**
-
----
-
-## 2. Repository and documentation
-
-| Item | Status | Evidence |
-| --- | --- | --- |
-| README.md | Missing | File is empty |
-| ASSUMPTIONS.md | Missing | File is empty |
-| LIMITATIONS.md | Missing | File is empty |
-| PROMPT_HISTORY.md | Missing | File is empty |
-| docs/architecture.md | Partially implemented | Entities, inventory equation, seed; omits APIs, frontend, evaluation caveats |
-| .env.example | Missing | Empty file at repo root |
-| .gitignore | Implemented | Ignores `.env`, venv, `data/generated/`, node_modules |
-| requirements.txt | Partially implemented | Full pip freeze including unrelated packages (`agent-detector`, OpenTelemetry, Sentry) |
-| Automated tests | Missing | No `tests/` directory, no pytest config |
-| Alembic migration | Implemented | 12 business tables + alembic_version |
-
----
-
-## 3. Backend
-
-### 3.1 Application shell
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| FastAPI app | Implemented but untested | `backend/app/main.py` |
-| CORS | Partially implemented | Hardcoded localhost Vite origins only |
-| Settings | Partially implemented | `python-dotenv` + `os.getenv`; no validation; engine created at import |
-| Session management | Partially implemented | `get_db` closes session; no rollback on exception |
-| Health `/health` | Implemented but untested | Always 200 |
-| Health `/health/database` | Partially implemented | Returns 200 with `"status": "error"` on failure; may leak driver messages |
-| Pydantic request models | Partially implemented | Variance + investigation bodies only |
-| Consistent response schemas | Missing | Mix of dicts and ORM objects |
-| Pagination | Missing | `/alerts` and `/investigations` return full collections |
-| Logging | Missing | |
-| Exception handling | Partially implemented | Bare `except: rollback; raise` on a few writes |
-| AuthN/AuthZ | Missing | Not claimed; internal academic demo |
-
-### 3.2 Inventory calculation
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Expected stock API | Partially implemented | Current-balance only; **no `as_of` / `counted_at` filter** |
-| Increase types in API service | Broken / incomplete | `inventory_service.py` omits `ADJUSTMENT_IN` / `ADJUSTMENT_OUT` (detection engine includes them) |
-| Historical expected stock | Implemented in detection only | `detection_engine.load_inventory_data` filters `effective_at <= counted_at` |
-| Transfer pairing | Implemented in generator | Paired TRANSFER_OUT/IN with `transfer_group_id`; live counts match |
-| Treating transfers as shrinkage | Implemented correctly | Transfers change location stock, not shrinkage |
-| Variance API | Implemented but untested | `counted - expected`; types SHORTAGE / SURPLUS / MATCHED |
-
-Duplicate business logic: movement sign rules exist in `inventory_service.py`, `detection_engine.py`, and `generate_data.py`.
-
-### 3.3 Alerts
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| POST `/alerts/detect` | Partially implemented | Creates alert for shortage ≥ 5; no duplicate guard; no `cycle_count_id`; uses `count()` for alert numbers (race-prone) |
-| GET `/alerts` | Partially implemented | Filter by status only; omits detection_rule, confidence, cycle_count_id |
-| GET `/alerts/{id}` | Missing | |
-| Frontend field mapping | Broken | UI reads `alert.variance`; API returns `variance_quantity` |
-| Persist from batch detection | Implemented | Skips existing `cycle_count_id` + `RULE_BASED_SHORTAGE` |
-| NULL historical fields | Tested and working (live) | Existing alerts are populated; do not backfill invented values |
-
-### 3.4 Investigations
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| POST `/investigations` | Partially implemented | Creates investigation, sets alert `INVESTIGATING`, writes start event |
-| Duplicate investigations | Missing | No uniqueness; a second POST creates another row |
-| GET `/investigations` | Partially implemented | Returns ORM models, no pagination, no alert code |
-| PUT `/investigations/{id}` | Partially implemented | Required findings/resolution/status; does **not** update alert status on resolve/close |
-| Event history | Implemented but untested | GET events; frontend expects `event.id`, API returns `event_id` |
-| Assign investigator after create | Missing | Only `assigned_to` on create |
-| `resolution` column | Partially implemented | Schema is `String(100)`; long notes will fail at DB |
-
-Schema change would be required to widen `resolution`. **Not done** (needs approval).
-
-### 3.5 Catalog / dashboard APIs
-
-| Item | Status |
-| --- | --- |
-| Stores list | Missing |
-| SKU list | Missing |
-| Dashboard aggregate counts | Missing |
-| Analytics aggregates | Missing |
-| Model metrics API | Missing |
-| Cycle count listing | Missing |
-
----
-
-## 4. Detection engine and ML
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Rule-based shortage | Implemented | `shortage >= 5` |
-| Isolation Forest | Partially implemented | Fits and scores the **same** rows (no hold-out) |
-| Features | Partially implemented | variance, shortage_ratio, unit_cost, estimated_loss; no movement frequency |
-| Target leakage | Broken (evaluation) | Labels never used as features (good), but features are the same quantities used to **generate** synthetic labels |
-| Accuracy metric | Missing | Precision/recall/F1/FPR/confusion only |
-| Recorded metrics | Implemented | `model_metrics.csv`: Rule-based P/R/F1 = 1.0; Isolation Forest F1 ≈ 0.9992 |
-| Metric integrity | Broken as a real-world claim | Perfect rule score is expected: generator injects shortage ≥ 5 iff `is_shrinkage=1` |
-| Ground truth path | Partially implemented | Relative `data/generated/...` depends on process cwd |
-| Batch join performance | Partially implemented | Per-count SQL join against 1M movements is likely too heavy to re-run casually |
-
----
-
-## 5. Frontend
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| React + Vite + Tailwind | Implemented | |
-| Sidebar + alerts + investigations | Partially implemented | Single `App.jsx` |
-| Dashboard KPIs | Partially implemented | Derived from loaded alerts only; hardcoded “Detection Engine Active” |
-| Stores / Products / Inventory / Model / Health pages | Missing | |
-| Charts | Partially implemented | CSS bars only; `recharts` unused |
-| API base URL | Partially implemented | Hardcoded `http://127.0.0.1:8000` |
-| Loading / error / empty | Implemented but untested | |
-| Variance column | Broken | Wrong field name |
-| Page title | Partially implemented | `index.html` title is “frontend” |
-| Frontend tests | Missing | |
-| Secrets in frontend | Implemented correctly | None found |
-
----
-
-## 6. Data generation
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Incremental `--append-full` | Implemented | Refuses to run without flag; no `--reset` in current script |
-| Seed 20261022 | Implemented | |
-| Transfer pairing | Implemented | |
-| Shrinkage injection ~10% | Implemented | Missing qty 5–20 when expected ≥ 5 |
-| Returns / promotions | Missing (data) | Models exist; generator does not populate |
-| Faker | Missing | Listed in stack; generator uses `random` only |
-
----
-
-## 7. Security and quality
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| SQL injection | Implemented (good) | SQLAlchemy bound parameters |
-| Credentials | Implemented (good) | Live `.env` gitignored; example file empty |
-| Alembic URL | Partially implemented | `hide_password=False` when rendering URL |
-| CORS credentials + wildcard methods | Partially implemented | Fine for local demo; not production-hardened |
-| Input validation | Partially implemented | Some numeric floors; missing enums/length limits |
-| Error leakage | Partially implemented | DB health returns raw exception text |
-
----
-
-## 8. Performance
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Movement composite index | Implemented | `(store_id, sku_id, effective_at)` |
-| Alert list of ~2k rows | Acceptable | Should still paginate |
-| Loading 1M movements in the browser | Not present (good) | Must not be added |
-| Detection historical join | Risk | Needs an in-memory/prefix-sum approach, not a 20k×1M SQL join |
-| N+1 on alert list | Low | Single query; missing joins for store/SKU names |
-
----
-
-## 9. Priority gaps (for implementation)
-
-1. Unify inventory equation (adjustments + as-of timestamp) between API and detection.
-2. Complete alert/investigation APIs (detail, pagination, duplicate guards, alert status sync).
-3. Dashboard/catalog/analytics/metrics endpoints using real counts.
-4. Isolation Forest hold-out evaluation + honest metrics documentation.
-5. Frontend pages wired to those APIs; fix field mappings.
-6. Isolated automated tests (SQLite), never against the MySQL dataset.
-7. Documentation and GitHub hygiene (`.env.example`, README, requirements).
-
-No schema migration is required for the above if `resolution` notes stay ≤ 100 characters (documented limitation).
+**Project note:** StockGuard is a candidate project demonstrating inventory-data processing and shrinkage-detection concepts. Its synthetic-data results and local verification should not be interpreted as production validation or real-world model performance.

@@ -26,3 +26,12 @@ def signed_quantity(movement_type: str, quantity) -> Decimal:
     if movement_type in DECREASE_TYPES:
         return -amount
     return Decimal("0")
+
+def format_quantity(value) -> str:
+    """Format Decimal quantities without unnecessary trailing zeros."""
+    amount = Decimal(str(value))
+
+    if amount == 0:
+        return "0"
+
+    return format(amount.normalize(), "f")

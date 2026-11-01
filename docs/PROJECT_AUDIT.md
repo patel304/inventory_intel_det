@@ -1,231 +1,181 @@
-# StockGuard Project Audit
+StockGuard – Project Audit
 
-**Audit date:** 2026-10-31  
-**Branch:** `main` @ `d26bb9c` (working tree was clean at audit start)  
-**Method:** Source inspection, documentation review, and read-only MySQL queries. No records were modified.
+**Project:** Inventory Shrinkage Detection System
+**Purpose:** YottaFlex AI candidate project
+**Audit baseline:** 31 October 2026
+**Follow-up verification:** 1 November 2026
 
-Status legend used below:
+## 1. Executive Summary
 
-| Status | Meaning |
-| --- | --- |
-| Implemented | Code exists and matches the intended design |
-| Tested and working | Exercised against the live database or passing automated tests |
-| Implemented but untested | Code exists; no automated test and not verified in this audit |
-| Partially implemented | Core path exists; important cases missing |
-| Missing | Required for the product, not present |
-| Broken | Incorrect, unsafe, or will fail in normal use |
+StockGuard is a local inventory shrinkage detection application built with React, FastAPI, MySQL, SQLAlchemy and scikit-learn. The project contains a populated synthetic retail inventory dataset, inventory lookup, shrinkage alerts, investigation workflows and anomaly-detection functionality.
 
----
+The application was further tested on 1 November 2026. The frontend production build completed successfully. ESLint reported no errors and one React Hook dependency warning. The inventory lookup endpoint returned HTTP 200 for Store ID `11` and SKU ID `201`; the frontend lookup was then tested successfully. The investigation save/close workflow and Shrinkage Alerts search-focus issue were also reported as fixed and working.
 
-## 1. Verified live database (read-only)
+This report distinguishes the original source audit from subsequent checks. It does not claim that every item below has been re-audited after those changes.
 
-| Table | Row count | Notes |
-| --- | --- | --- |
-| stores | 100 | Matches stated full dataset |
-| skus | 5,000 | Matches stated full dataset |
-| inventory_movements | 1,000,000 | Preserved; do not regenerate |
-| cycle_counts | 20,000 | Preserved |
-| employee_roles | 4 | |
-| shifts | 2 | |
-| shrinkage_alerts | 1,994 | All have `cycle_count_id` and expected/observed/variance |
-| investigations | 2 | Both `IN_PROGRESS` |
-| investigation_events | 2 | |
-| returns | 0 | Table exists, unused |
-| promotions | 0 | Table exists, unused |
-| promotion_skus | 0 | Table exists, unused |
-| alembic_version | 1 | Single migration `6c8916762d8e` |
+## 2. Dataset Snapshot
 
-Movement type mix (live):
+The read-only database audit recorded:
 
-- OPENING_BALANCE 500,000
-- SALE 249,789
-- RECEIPT 114,159
-- DAMAGE 45,370
-- TRANSFER_OUT 45,341
-- TRANSFER_IN 45,341
+| Table / entity | Row count |
+|---|---:|
+| Stores | 100 |
+| SKUs | 5,000 |
+| Inventory movements | 1,000,000 |
+| Cycle counts | 20,000 |
+| Employee roles | 4 |
+| Shifts | 2 |
+| Shrinkage alerts | 1,994 |
+| Investigations | 2 |
+| Investigation events | 2 |
+| Returns | 0 |
+| Promotions | 0 |
+| Promotion-SKU mappings | 0 |
 
-No `ADJUSTMENT_IN` / `ADJUSTMENT_OUT` / `RETURN_IN` rows exist in the current dataset.
+The audited movement types were opening balance, sale, receipt, damage, transfer out and transfer in. The audit found no populated adjustment or return movement rows.
 
-Read-only integrity samples:
+Additional read-only integrity checks in the original audit reported:
+- No unmatched transfer in/out group counts in the sampled check.
+- No negative movement quantities in the sampled check.
+- No alerts with null expected quantity or null cycle-count reference.
+- 20,000 ground-truth rows, including 1,994 shrinkage labels.
 
-- Transfer groups with unmatched IN/OUT counts: **0**
-- Negative movement quantities: **0**
-- Alerts with NULL expected quantity: **0**
-- Alerts with NULL cycle_count_id: **0**
-- Duplicate `count_code` in `ground_truth.csv`: **0**
-- Ground-truth rows: **20,000**; shrinkage labels: **1,994**
+The ground-truth file was located under `backend/data/generated/ground_truth.csv` and was gitignored at the time of the audit. Preserve the existing generated data; do not overwrite or regenerate it casually.
 
-Ground truth file present at `backend/data/generated/ground_truth.csv` (gitignored). **Do not overwrite.**
+## 3. Follow-up Verification on 1 November 2026
 
----
+| Check | Result | Evidence / note |
+|---|---|---|
+| `npm run build` | PASS | Vite production build completed successfully |
+| `npm run lint` | PASS WITH WARNING | Zero errors; one missing `fetchAlerts` dependency warning in `App.jsx` |
+| Store listing API | PASS | Returned store records; first displayed store ID was 11 |
+| SKU listing API | PASS | Returned SKU records; first displayed SKU ID was 201 |
+| Inventory lookup API | PASS | `GET /inventory/lookup?store_id=11&sku_id=201` returned HTTP 200 |
+| Inventory Lookup UI | PASS | User confirmed successful frontend result |
+| Investigation save/update and modal close | PASS | User confirmed working after the fix |
+| Shrinkage Alerts search focus | PASS | User confirmed typing/focus issue fixed |
 
-## 2. Repository and documentation
+The inventory lookup response included `STORE-000001`, `SKU-000001`, expected stock `115.000`, and a latest cycle count of `108.000`. These values are from the local development database and may differ in another environment.
 
-| Item | Status | Evidence |
-| --- | --- | --- |
-| README.md | Missing | File is empty |
-| ASSUMPTIONS.md | Missing | File is empty |
-| LIMITATIONS.md | Missing | File is empty |
-| PROMPT_HISTORY.md | Missing | File is empty |
-| docs/architecture.md | Partially implemented | Entities, inventory equation, seed; omits APIs, frontend, evaluation caveats |
-| .env.example | Missing | Empty file at repo root |
-| .gitignore | Implemented | Ignores `.env`, venv, `data/generated/`, node_modules |
-| requirements.txt | Partially implemented | Full pip freeze including unrelated packages (`agent-detector`, OpenTelemetry, Sentry) |
-| Automated tests | Missing | No `tests/` directory, no pytest config |
-| Alembic migration | Implemented | 12 business tables + alembic_version |
+## 4. Original Audit Findings
 
----
+The following items were identified during the 31 October source audit. They are retained here as findings to re-check against the current working tree, not as claims that they are all still present.
 
-## 3. Backend
+### 4.1 Inventory calculation
 
-### 3.1 Application shell
+- The original audit found the expected-stock API was current-balance oriented and did not accept an `as_of` / `counted_at` filter.
+- Movement sign rules were duplicated across inventory service, detection engine and data generation code.
+- The original audit reported adjustment movement handling was inconsistent between the inventory service and detection engine.
+- Historical expected-stock logic existed in the detection engine using movement timestamps.
+- Transfer pairing was present in the generator and the audited live transfer groups were balanced.
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| FastAPI app | Implemented but untested | `backend/app/main.py` |
-| CORS | Partially implemented | Hardcoded localhost Vite origins only |
-| Settings | Partially implemented | `python-dotenv` + `os.getenv`; no validation; engine created at import |
-| Session management | Partially implemented | `get_db` closes session; no rollback on exception |
-| Health `/health` | Implemented but untested | Always 200 |
-| Health `/health/database` | Partially implemented | Returns 200 with `"status": "error"` on failure; may leak driver messages |
-| Pydantic request models | Partially implemented | Variance + investigation bodies only |
-| Consistent response schemas | Missing | Mix of dicts and ORM objects |
-| Pagination | Missing | `/alerts` and `/investigations` return full collections |
-| Logging | Missing | |
-| Exception handling | Partially implemented | Bare `except: rollback; raise` on a few writes |
-| AuthN/AuthZ | Missing | Not claimed; internal academic demo |
+**Recommended verification:** Confirm that all supported movement types use one consistent movement-sign definition and that historical stock is calculated at the relevant cycle-count timestamp.
 
-### 3.2 Inventory calculation
+### 4.2 Alerts
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| Expected stock API | Partially implemented | Current-balance only; **no `as_of` / `counted_at` filter** |
-| Increase types in API service | Broken / incomplete | `inventory_service.py` omits `ADJUSTMENT_IN` / `ADJUSTMENT_OUT` (detection engine includes them) |
-| Historical expected stock | Implemented in detection only | `detection_engine.load_inventory_data` filters `effective_at <= counted_at` |
-| Transfer pairing | Implemented in generator | Paired TRANSFER_OUT/IN with `transfer_group_id`; live counts match |
-| Treating transfers as shrinkage | Implemented correctly | Transfers change location stock, not shrinkage |
-| Variance API | Implemented but untested | `counted - expected`; types SHORTAGE / SURPLUS / MATCHED |
+The original audit reported:
+- A shortage threshold rule in the alert-detection endpoint.
+- No duplicate guard in one alert-creation path.
+- Differences between alert field names returned by the API and consumed by the frontend.
+- Missing alert-detail endpoint in the audited version.
+- Collection response and pagination improvements needed.
 
-Duplicate business logic: movement sign rules exist in `inventory_service.py`, `detection_engine.py`, and `generate_data.py`.
+**Recommended verification:** Re-check duplicate handling, API/frontend field mappings, detail retrieval, pagination and alert identifiers in the current code.
 
-### 3.3 Alerts
+### 4.3 Investigations
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| POST `/alerts/detect` | Partially implemented | Creates alert for shortage ≥ 5; no duplicate guard; no `cycle_count_id`; uses `count()` for alert numbers (race-prone) |
-| GET `/alerts` | Partially implemented | Filter by status only; omits detection_rule, confidence, cycle_count_id |
-| GET `/alerts/{id}` | Missing | |
-| Frontend field mapping | Broken | UI reads `alert.variance`; API returns `variance_quantity` |
-| Persist from batch detection | Implemented | Skips existing `cycle_count_id` + `RULE_BASED_SHORTAGE` |
-| NULL historical fields | Tested and working (live) | Existing alerts are populated; do not backfill invented values |
+The original audit reported:
+- Investigation creation and event creation were implemented.
+- Duplicate investigation protection was missing.
+- Resolving or closing an investigation did not synchronize the related alert status.
+- Investigation event field naming differed between API and frontend expectations.
+- The resolution column had a 100-character limit.
 
-### 3.4 Investigations
+The save/update modal workflow was subsequently fixed and manually verified on 1 November. This UI fix does not by itself establish that alert-status synchronization, duplicate prevention or long-resolution handling are complete.
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| POST `/investigations` | Partially implemented | Creates investigation, sets alert `INVESTIGATING`, writes start event |
-| Duplicate investigations | Missing | No uniqueness; a second POST creates another row |
-| GET `/investigations` | Partially implemented | Returns ORM models, no pagination, no alert code |
-| PUT `/investigations/{id}` | Partially implemented | Required findings/resolution/status; does **not** update alert status on resolve/close |
-| Event history | Implemented but untested | GET events; frontend expects `event.id`, API returns `event_id` |
-| Assign investigator after create | Missing | Only `assigned_to` on create |
-| `resolution` column | Partially implemented | Schema is `String(100)`; long notes will fail at DB |
+### 4.4 Detection engine and machine learning
 
-Schema change would be required to widen `resolution`. **Not done** (needs approval).
+The original audit reported:
+- Rule-based shortage detection used a shortage threshold of 5 units.
+- Isolation Forest was fitted and evaluated on the same rows rather than a separate hold-out set.
+- Some model features overlapped with quantities used to generate synthetic labels.
+- Consequently, recorded metrics may be optimistic and should not be presented as real-world predictive performance.
 
-### 3.5 Catalog / dashboard APIs
+**Recommended verification:** Use a separate hold-out dataset or a carefully designed validation split. Document the synthetic label-generation process, features, split strategy and limitations. Do not claim general real-world model accuracy from synthetic data alone.
 
-| Item | Status |
-| --- | --- |
-| Stores list | Missing |
-| SKU list | Missing |
-| Dashboard aggregate counts | Missing |
-| Analytics aggregates | Missing |
-| Model metrics API | Missing |
-| Cycle count listing | Missing |
+### 4.5 Frontend
 
----
+The original audit reported issues with frontend field mapping, page coverage and configuration. Several pages and UI workflows were subsequently developed or tested. The following should be rechecked against the current frontend:
+- Alert variance field mapping.
+- Dashboard KPI source and calculation.
+- API base URL configuration.
+- Page-level loading, error and empty states.
+- Page title and unused dependencies.
+- Remaining React Hook dependency warning.
 
-## 4. Detection engine and ML
+### 4.6 Security and operational readiness
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| Rule-based shortage | Implemented | `shortage >= 5` |
-| Isolation Forest | Partially implemented | Fits and scores the **same** rows (no hold-out) |
-| Features | Partially implemented | variance, shortage_ratio, unit_cost, estimated_loss; no movement frequency |
-| Target leakage | Broken (evaluation) | Labels never used as features (good), but features are the same quantities used to **generate** synthetic labels |
-| Accuracy metric | Missing | Precision/recall/F1/FPR/confusion only |
-| Recorded metrics | Implemented | `model_metrics.csv`: Rule-based P/R/F1 = 1.0; Isolation Forest F1 ≈ 0.9992 |
-| Metric integrity | Broken as a real-world claim | Perfect rule score is expected: generator injects shortage ≥ 5 iff `is_shrinkage=1` |
-| Ground truth path | Partially implemented | Relative `data/generated/...` depends on process cwd |
-| Batch join performance | Partially implemented | Per-count SQL join against 1M movements is likely too heavy to re-run casually |
+The original audit noted:
+- No authentication or authorization in the audited version.
+- Local-development CORS configuration.
+- Configuration validation and logging improvements needed.
+- Database health endpoint error handling needed review.
+- `.env.example` was empty at audit time.
 
----
+StockGuard should therefore be described as a local demonstration / candidate project, not a production-hardened system.
 
-## 5. Frontend
+## 5. Prioritized Remaining Work
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| React + Vite + Tailwind | Implemented | |
-| Sidebar + alerts + investigations | Partially implemented | Single `App.jsx` |
-| Dashboard KPIs | Partially implemented | Derived from loaded alerts only; hardcoded “Detection Engine Active” |
-| Stores / Products / Inventory / Model / Health pages | Missing | |
-| Charts | Partially implemented | CSS bars only; `recharts` unused |
-| API base URL | Partially implemented | Hardcoded `http://127.0.0.1:8000` |
-| Loading / error / empty | Implemented but untested | |
-| Variance column | Broken | Wrong field name |
-| Page title | Partially implemented | `index.html` title is “frontend” |
-| Frontend tests | Missing | |
-| Secrets in frontend | Implemented correctly | None found |
+The following are recommended priorities. Verify each item before changing code.
 
----
+| Priority | Task | Reason |
+|---|---|---|
+| P0 | Re-check inventory movement sign consistency and historical stock calculations | Core business correctness |
+| P0 | Validate alert and investigation lifecycle, including status synchronization and duplicate prevention | Workflow correctness |
+| P0 | Review ML evaluation methodology and document limitations honestly | Avoid misleading model claims |
+| P1 | Add focused tests for stock calculations, variance, alert creation and investigation updates | Regression protection |
+| P1 | Re-check API/frontend field mappings and pagination | Data consistency and usability |
+| P1 | Complete `.env.example` using actual configuration variable names | Reproducible local setup |
+| P1 | Review `.gitignore` and confirm no credentials or private generated data are committed | Public repository safety |
+| P2 | Improve logging, configuration validation and error handling | Maintainability |
+| P2 | Consider authentication/authorization only if the intended deployment requires it | Production readiness |
 
-## 6. Data generation
+Do not add features solely to make the project larger. Prioritize correctness, reproducibility, transparent limitations and the ability to explain the implementation.
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| Incremental `--append-full` | Implemented | Refuses to run without flag; no `--reset` in current script |
-| Seed 20261022 | Implemented | |
-| Transfer pairing | Implemented | |
-| Shrinkage injection ~10% | Implemented | Missing qty 5–20 when expected ≥ 5 |
-| Returns / promotions | Missing (data) | Models exist; generator does not populate |
-| Faker | Missing | Listed in stack; generator uses `random` only |
+## 6. Verification Commands
 
----
+Run these from the relevant project directories:
 
-## 7. Security and quality
+### Frontend
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| SQL injection | Implemented (good) | SQLAlchemy bound parameters |
-| Credentials | Implemented (good) | Live `.env` gitignored; example file empty |
-| Alembic URL | Partially implemented | `hide_password=False` when rendering URL |
-| CORS credentials + wildcard methods | Partially implemented | Fine for local demo; not production-hardened |
-| Input validation | Partially implemented | Some numeric floors; missing enums/length limits |
-| Error leakage | Partially implemented | DB health returns raw exception text |
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
----
+### Backend
 
-## 8. Performance
+Start the backend using the repository's documented command, then verify the health endpoint and core APIs using the actual routes exposed by the running application.
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| Movement composite index | Implemented | `(store_id, sku_id, effective_at)` |
-| Alert list of ~2k rows | Acceptable | Should still paginate |
-| Loading 1M movements in the browser | Not present (good) | Must not be added |
-| Detection historical join | Risk | Needs an in-memory/prefix-sum approach, not a 20k×1M SQL join |
-| N+1 on alert list | Low | Single query; missing joins for store/SKU names |
+Example inventory lookup:
 
----
+```bash
+curl -i "http://127.0.0.1:8000/inventory/lookup?store_id=11&sku_id=201"
+```
 
-## 9. Priority gaps (for implementation)
+Use IDs that exist in the target database. Do not assume IDs are always `1`.
 
-1. Unify inventory equation (adjustments + as-of timestamp) between API and detection.
-2. Complete alert/investigation APIs (detail, pagination, duplicate guards, alert status sync).
-3. Dashboard/catalog/analytics/metrics endpoints using real counts.
-4. Isolation Forest hold-out evaluation + honest metrics documentation.
-5. Frontend pages wired to those APIs; fix field mappings.
-6. Isolated automated tests (SQLite), never against the MySQL dataset.
-7. Documentation and GitHub hygiene (`.env.example`, README, requirements).
+## 7. Audit Limitations
 
-No schema migration is required for the above if `resolution` notes stay ≤ 100 characters (documented limitation).
+- The original audit was a source inspection and read-only database review dated 31 October 2026.
+- Follow-up checks on 1 November cover only the explicitly listed frontend build, lint, lookup and user-confirmed UI workflows.
+- Other original audit findings have not all been independently re-tested after subsequent development.
+- Synthetic dataset metrics are not evidence of performance on real retail data.
+- This report does not certify production readiness, security compliance or real-world model effectiveness.
+
+## 8. Final Assessment
+
+StockGuard has a working local application flow and a substantial synthetic inventory dataset. The frontend build succeeds, inventory lookup has been verified end-to-end, and the reported UI regressions have been fixed.
+
+The most important remaining work is not adding more screens. It is validating core inventory business rules, checking alert/investigation lifecycle consistency, improving model evaluation methodology, adding focused tests, and completing public-repository documentation and configuration safely.

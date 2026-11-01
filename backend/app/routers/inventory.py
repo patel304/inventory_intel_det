@@ -9,6 +9,7 @@ from app.schemas.inventory import ExpectedStockResponse, VarianceRequest
 from app.services.catalog_service import inventory_lookup, list_cycle_counts
 from app.services.inventory_service import calculate_expected_stock
 from app.services.variance_service import calculate_variance
+from app.inventory_math import format_quantity
 
 router = APIRouter(tags=["inventory"])
 
@@ -32,7 +33,7 @@ def get_expected_stock(
     return ExpectedStockResponse(
         store_id=store_id,
         sku_id=sku_id,
-        expected_stock=str(expected_stock),
+        expected_stock=format_quantity(expected_stock),
         as_of=as_of,
     )
 

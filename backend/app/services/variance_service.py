@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.inventory_math import format_quantity
 from app.services.inventory_service import calculate_expected_stock
 
 
@@ -28,9 +29,9 @@ def calculate_variance(
     return {
         "store_id": store_id,
         "sku_id": sku_id,
-        "expected_quantity": str(expected),
-        "counted_quantity": str(counted),
-        "variance_quantity": str(variance),
+        "expected_quantity": format_quantity(expected),
+        "counted_quantity": format_quantity(counted),
+        "variance_quantity": format_quantity(variance),
         "variance_type": classify_variance(variance),
         "as_of": as_of.isoformat() if as_of else None,
     }
