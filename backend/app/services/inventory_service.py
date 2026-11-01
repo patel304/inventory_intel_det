@@ -1,51 +1,45 @@
-
+from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import func
 
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.inventory_math import signed_quantity
 from app.models import InventoryMovement
 
-INCREASE_TYPES = {
-    "OPENING_BALANCE",
-    "RECEIPT",
-    "RETURN_IN",
-    "TRANSFER_IN",
-}
 
-DECREASE_TYPES = {
-    "SALE",
-    "DAMAGE",
-    "TRANSFER_OUT",
-}
-
-
-def calculate_expected_stock(db, store_id, sku_id):
+def calculate_expected_stock(
+    db: Session,
+    store_id: int,
+    sku_id: int,
+    as_of: datetime | None = None,
+) -> Decimal:
     """
-    Calculate expected inventory for one store and SKU.
-    Movement quantities are treated as positive magnitudes.
-    """
+    Expected stock for one store/SKU.
 
-    movements = (
-        db.query(
-            InventoryMovement.movement_type,
-            func.sum(InventoryMovement.quantity).label("total_quantity"),
-        )
-        .filter(
-            InventoryMovement.store_id == store_id,
-            InventoryMovement.sku_id == sku_id,
-        )
-        .group_by(InventoryMovement.movement_type)
-        .all()
+    Expected Stock =
+      Opening Balance + Receipts + Returns In + Transfers In
+      - Sales - Transfers Out - Damage
+      + Adjustments In - Adjustments Out
+
+    If as_of is provided, only movements with effective_at <= as_of are included.
+    Quantities are treated as positive magnitudes.
+    """
+    query = db.query(
+        InventoryMovement.movement_type,
+        func.sum(InventoryMovement.quantity).label("total_quantity"),
+    ).filter(
+        InventoryMovement.store_id == store_id,
+        InventoryMovement.sku_id == sku_id,
     )
 
+    if as_of is not None:
+        query = query.filter(InventoryMovement.effective_at <= as_of)
+
+    movements = query.group_by(InventoryMovement.movement_type).all()
+
     expected_stock = Decimal("0")
-
     for movement_type, total_quantity in movements:
-        quantity = Decimal(str(total_quantity or 0))
-
-        if movement_type in INCREASE_TYPES:
-            expected_stock += quantity
-
-        elif movement_type in DECREASE_TYPES:
-            expected_stock -= quantity
+        expected_stock += signed_quantity(movement_type, total_quantity)
 
     return expected_stock

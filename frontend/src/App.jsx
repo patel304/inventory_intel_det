@@ -2,15 +2,23 @@
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, AlertTriangle, ClipboardList,
-  BarChart3, Search, Bell, Package, ShieldCheck,
-  TrendingDown, Menu, X, History, Plus, RefreshCw
+  BarChart3, Search, Package, ShieldCheck,
+  Menu, X, History, RefreshCw,
+  Store as StoreIcon, Boxes, Warehouse, BrainCircuit, Activity
 } from "lucide-react";
-import api from "./services/api";
+import api, { getErrorMessage } from "./services/api";
+import Dashboard from "./pages/Dashboard";
+import Stores from "./pages/Stores";
 
 const navigation = [
   { name: "Dashboard", icon: LayoutDashboard },
   { name: "Shrinkage Alerts", icon: AlertTriangle },
   { name: "Investigations", icon: ClipboardList },
+  { name: "Stores", icon: StoreIcon },
+  { name: "Products / SKUs", icon: Boxes },
+  { name: "Inventory Lookup", icon: Warehouse },
+  { name: "Model Performance", icon: BrainCircuit },
+  { name: "System Health", icon: Activity },
   { name: "Analytics", icon: BarChart3 },
 ];
 
@@ -25,10 +33,17 @@ function getList(data) {
 export default function App() {
   const [page, setPage] = useState("Dashboard");
   const [alerts, setAlerts] = useState([]);
+  const [alertTotal, setAlertTotal] = useState(0);
+  const [alertPage, setAlertPage] = useState(1);
   const [investigations, setInvestigations] = useState([]);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [selectedInvestigation, setSelectedInvestigation] = useState(null);
   const [events, setEvents] = useState([]);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [skus, setSkus] = useState([]);
+  const [skuTotal, setSkuTotal] = useState(0);
+  const [skuPage, setSkuPage] = useState(1);
+  const [skuSearch, setSkuSearch] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -48,8 +63,17 @@ export default function App() {
     useState("IN_PROGRESS");
 
   async function fetchAlerts() {
-    const response = await api.get("/alerts");
+    const response = await api.get("/alerts", {
+      params: {
+        page: alertPage,
+        page_size: 25,
+        search: searchTerm || undefined,
+        severity: severityFilter === "ALL" ? undefined : severityFilter,
+        status: statusFilter === "ALL" ? undefined : statusFilter,
+      },
+    });
     setAlerts(getList(response.data));
+    setAlertTotal(response.data.total ?? 0);
   }
 
   async function fetchInvestigations() {
@@ -62,63 +86,32 @@ export default function App() {
       setLoading(true);
       setError("");
       try {
-        if (
-          page === "Dashboard" ||
-          page === "Shrinkage Alerts" ||
-          page === "Analytics"
-        ) {
+        if (page === "Shrinkage Alerts") {
           await fetchAlerts();
         }
-
         if (page === "Investigations") {
           await fetchInvestigations();
         }
+        if (page === "Analytics") {
+          const response = await api.get("/analytics/summary");
+          setAnalyticsData(response.data);
+        }
+        if (page === "Products / SKUs") {
+          const response = await api.get("/skus", {
+            params: { page: skuPage, page_size: 20, search: skuSearch || undefined },
+          });
+          setSkus(getList(response.data));
+          setSkuTotal(response.data.total ?? 0);
+        }
       } catch (err) {
-        setError(
-          err.response?.data?.detail ||
-          "Unable to load data. Check backend connection."
-        );
+        setError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
     }
 
     loadData();
-  }, [page]);
-
-  const openCount = alerts.filter(a => a.status === "OPEN").length;
-  const highCount = alerts.filter(a => a.severity === "HIGH").length;
-
-  const filteredAlerts = alerts.filter(alert => {
-    const search = searchTerm.toLowerCase();
-
-    const matchesSearch =
-      String(alert.alert_code || "").toLowerCase().includes(search) ||
-      String(alert.store_id || "").includes(search) ||
-      String(alert.sku_id || "").includes(search);
-
-    const matchesSeverity =
-      severityFilter === "ALL" ||
-      alert.severity === severityFilter;
-
-    const matchesStatus =
-      statusFilter === "ALL" ||
-      alert.status === statusFilter;
-
-    return matchesSearch && matchesSeverity && matchesStatus;
-  });
-
-  const severityData = ["HIGH", "MEDIUM", "LOW"].map(name => ({
-    name,
-    value: alerts.filter(a => a.severity === name).length,
-  }));
-
-  const statusData = [
-    "OPEN", "INVESTIGATING", "RESOLVED", "CLOSED"
-  ].map(name => ({
-    name,
-    value: alerts.filter(a => a.status === name).length,
-  }));
+  }, [page, skuPage, skuSearch, alertPage, searchTerm, severityFilter, statusFilter]);
 
   async function createInvestigation(alert) {
     setActionLoading(true);
@@ -341,29 +334,42 @@ export default function App() {
             </div>
           ) : (
             <>
-              {(page === "Dashboard" || page === "Analytics") && (
-                <div className="mb-7 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <StatCard title="Total Alerts" value={alerts.length} icon={AlertTriangle} color="blue" />
-                  <StatCard title="Open Alerts" value={openCount} icon={ClipboardList} color="amber" />
-                  <StatCard title="High Severity" value={highCount} icon={TrendingDown} color="red" />
-                  <StatCard title="Detection Engine" value="Active" icon={ShieldCheck} color="green" />
-                </div>
+              {page === "Dashboard" && (
+                <Dashboard onOpenAlert={setSelectedAlert} />
               )}
 
-              {(page === "Dashboard" || page === "Shrinkage Alerts") && (
+              {page === "Stores" && <Stores />}
+
+              {page === "Inventory Lookup" && <InventoryLookup />}
+
+              {page === "Model Performance" && <ModelPerformance />}
+
+              {page === "System Health" && <SystemHealth />}
+
+              {page === "Products / SKUs" && (
+                <SkuCatalog
+                  items={skus}
+                  total={skuTotal}
+                  page={skuPage}
+                  search={skuSearch}
+                  onSearch={(value) => { setSkuPage(1); setSkuSearch(value); }}
+                  onPage={setSkuPage}
+                />
+              )}
+
+              {page === "Shrinkage Alerts" && (
                 <AlertTable
-                  alerts={
-                    page === "Dashboard"
-                      ? filteredAlerts.slice(0, 10)
-                      : filteredAlerts
-                  }
+                  alerts={alerts}
+                  total={alertTotal}
+                  page={alertPage}
+                  onPage={setAlertPage}
                   onSelect={setSelectedAlert}
                   searchTerm={searchTerm}
-                  setSearchTerm={setSearchTerm}
+                  setSearchTerm={(value) => { setAlertPage(1); setSearchTerm(value); }}
                   severityFilter={severityFilter}
-                  setSeverityFilter={setSeverityFilter}
+                  setSeverityFilter={(value) => { setAlertPage(1); setSeverityFilter(value); }}
                   statusFilter={statusFilter}
-                  setStatusFilter={setStatusFilter}
+                  setStatusFilter={(value) => { setAlertPage(1); setStatusFilter(value); }}
                 />
               )}
 
@@ -376,10 +382,7 @@ export default function App() {
               )}
 
               {page === "Analytics" && (
-                <Analytics
-                  severityData={severityData}
-                  statusData={statusData}
-                />
+                <Analytics data={analyticsData} />
               )}
             </>
           )}
@@ -418,29 +421,6 @@ export default function App() {
   );
 }
 
-function StatCard({ title, value, icon: Icon, color }) {
-  const styles = {
-    blue: "bg-blue-50 text-blue-600",
-    amber: "bg-amber-50 text-amber-600",
-    red: "bg-red-50 text-red-600",
-    green: "bg-emerald-50 text-emerald-600",
-  };
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-500">{title}</p>
-        <div className={`rounded-xl p-3 ${styles[color]}`}>
-          <Icon size={21} />
-        </div>
-      </div>
-      <h3 className="mt-5 text-3xl font-bold text-slate-900">
-        {value}
-      </h3>
-    </div>
-  );
-}
-
 function Badge({ value }) {
   const color = {
     HIGH: "bg-red-100 text-red-700",
@@ -462,6 +442,9 @@ function Badge({ value }) {
 
 function AlertTable({
   alerts,
+  total,
+  page,
+  onPage,
   onSelect,
   searchTerm,
   setSearchTerm,
@@ -515,7 +498,7 @@ function AlertTable({
 
         <div className="mt-4 flex justify-between text-sm">
           <span className="text-slate-500">
-            Showing {alerts.length} alerts
+            Showing {alerts.length} of {total} alerts · Page {page} of {Math.max(1, Math.ceil(total / 25))}
           </span>
           <button
             onClick={() => {
@@ -547,8 +530,8 @@ function AlertTable({
                 className="cursor-pointer hover:bg-blue-50"
               >
                 <td className="px-5 py-4 font-semibold text-blue-700">{alert.alert_code}</td>
-                <td className="px-5 py-4">{alert.store_id}</td>
-                <td className="px-5 py-4">{alert.sku_id}</td>
+                <td className="px-5 py-4">{alert.store_code || alert.store_name || alert.store_id}</td>
+                <td className="px-5 py-4">{alert.sku_code || alert.sku_name || alert.sku_id}</td>
                 <td className="px-5 py-4">{alert.variance}</td>
                 <td className="px-5 py-4"><Badge value={alert.severity} /></td>
                 <td className="px-5 py-4"><Badge value={alert.status} /></td>
@@ -563,6 +546,11 @@ function AlertTable({
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-sm">
+        <button disabled={page <= 1} onClick={() => onPage(page - 1)} className="rounded-lg border px-3 py-1 disabled:opacity-40">Previous</button>
+        <span className="text-slate-500">Page {page} of {Math.max(1, Math.ceil(total / 25))}</span>
+        <button disabled={page >= Math.ceil(total / 25)} onClick={() => onPage(page + 1)} className="rounded-lg border px-3 py-1 disabled:opacity-40">Next</button>
       </div>
     </section>
   );
@@ -581,7 +569,7 @@ function AlertDetails({
     ["Observed Quantity", alert.observed_quantity],
     ["Variance", alert.variance],
     ["Confidence Score", alert.confidence_score],
-    ["Estimated Loss", alert.estimated_loss],
+    ["Estimated Loss (unit-cost basis)", alert.estimated_loss],
     ["Severity", alert.severity],
     ["Status", alert.status],
     ["Detected At", alert.detected_at
@@ -841,54 +829,175 @@ function InvestigationDetails({
   );
 }
 
-function Analytics({ severityData, statusData }) {
-  const max = Math.max(...severityData.map(x => x.value), 1);
+function InventoryLookup() {
+  const [storeId, setStoreId] = useState("");
+  const [skuId, setSkuId] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function lookup(event) {
+    event.preventDefault();
+    if (!storeId || !skuId || Number(storeId) <= 0 || Number(skuId) <= 0) {
+      setError("Enter valid positive Store ID and SKU ID values.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const response = await api.get("/inventory/lookup", {
+        params: { store_id: Number(storeId), sku_id: Number(skuId) },
+      });
+      setResult(response.data);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-      <section className="rounded-2xl border bg-white p-6 shadow-sm">
-        <h3 className="font-bold">Alert Severity Distribution</h3>
-        <p className="mb-7 mt-1 text-xs text-slate-500">
-          Breakdown by severity level
-        </p>
-        <div className="space-y-6">
-          {severityData.map(item => {
-            const colors = {
-              HIGH: "bg-red-500",
-              MEDIUM: "bg-amber-500",
-              LOW: "bg-emerald-500",
-            };
-            return (
-              <div key={item.name}>
-                <div className="mb-2 flex justify-between text-sm">
-                  <span className="font-medium">{item.name}</span>
-                  <span className="font-bold">{item.value}</span>
-                </div>
-                <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    className={`h-full rounded-full ${colors[item.name]}`}
-                    style={{ width: `${(item.value / max) * 100}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="font-bold text-slate-900">Inventory Position Lookup</h3>
+        <p className="mb-5 mt-1 text-sm text-slate-500">Read the calculated expected stock and latest cycle count for a store/SKU pair.</p>
+        <form onSubmit={lookup} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <label className="text-sm font-medium text-slate-700">Store ID<input type="number" min="1" value={storeId} onChange={(event) => setStoreId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5" placeholder="e.g. 1" /></label>
+          <label className="text-sm font-medium text-slate-700">SKU ID<input type="number" min="1" value={skuId} onChange={(event) => setSkuId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5" placeholder="e.g. 1" /></label>
+          <div className="flex items-end"><button disabled={loading} className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{loading ? "Looking up..." : "Check Inventory"}</button></div>
+        </form>
       </section>
+      {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+      {result && <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Store</p><p className="mt-2 text-xl font-bold">{result.store_code || result.store_id}</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">SKU</p><p className="mt-2 text-xl font-bold">{result.sku_code || result.sku_id}</p></div>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5 shadow-sm sm:col-span-2"><p className="text-sm text-blue-700">Expected stock</p><p className="mt-2 text-3xl font-bold text-blue-900">{result.expected_stock}</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:col-span-2"><p className="font-semibold">Latest cycle count</p>{result.latest_cycle_count ? <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3"><div><p className="text-slate-500">Count code</p><p className="mt-1 font-semibold">{result.latest_cycle_count.count_code}</p></div><div><p className="text-slate-500">Counted quantity</p><p className="mt-1 font-semibold">{result.latest_cycle_count.counted_quantity}</p></div><div><p className="text-slate-500">Counted at</p><p className="mt-1 font-semibold">{result.latest_cycle_count.counted_at ? new Date(result.latest_cycle_count.counted_at).toLocaleString() : "—"}</p></div></div> : <p className="mt-2 text-sm text-slate-500">No cycle count recorded for this store/SKU pair.</p>}</div>
+      </section>}
+    </div>
+  );
+}
 
-      <section className="rounded-2xl border bg-white p-6 shadow-sm">
-        <h3 className="font-bold">Alert Status Overview</h3>
-        <p className="mb-7 mt-1 text-xs text-slate-500">
-          Current alert workflow status
-        </p>
-        <div className="space-y-4">
-          {statusData.map(item => (
-            <div key={item.name} className="flex items-center justify-between rounded-xl bg-slate-50 p-4">
-              <span className="text-sm font-medium">{item.name}</span>
-              <span className="text-lg font-bold">{item.value}</span>
-            </div>
-          ))}
+function ModelPerformance() {
+  const [metrics, setMetrics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    api.get("/metrics/model").then((response) => { if (active) setMetrics(response.data); }).catch((err) => { if (active) setError(getErrorMessage(err)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+  if (loading) return <div className="rounded-xl border bg-white p-10 text-center text-slate-500">Loading model metrics...</div>;
+  if (error) return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+  const models = metrics?.models || [];
+  const metricKeys = ["precision", "recall", "f1_score", "accuracy", "false_positive_rate"];
+  return <div className="space-y-5">
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><strong>Synthetic-data evaluation:</strong> {metrics?.disclaimer || "These results are based on synthetic data and do not establish real-world production accuracy."}</div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Records evaluated</p><p className="mt-2 text-3xl font-bold">{metrics?.records_evaluated ?? "—"}</p></div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Actual shrinkage cases</p><p className="mt-2 text-3xl font-bold">{metrics?.actual_shrinkage_cases ?? "—"}</p></div>
+    </div>
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">{models.map((model) => <section key={model.model} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h3 className="text-lg font-bold">{model.model}</h3><div className="mt-5 grid grid-cols-2 gap-4">{metricKeys.map((key) => <div key={key} className="rounded-xl bg-slate-50 p-4"><p className="text-xs uppercase text-slate-500">{key.replaceAll("_", " ")}</p><p className="mt-2 text-2xl font-bold">{model[key] ?? "—"}</p></div>)}</div><p className="mt-4 text-xs text-slate-500">Evaluation: {model.evaluation || "Not specified"}</p></section>)}</div>
+    {models.length === 0 && <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No model metrics file is available. The application will not regenerate data automatically.</div>}
+  </div>;
+}
+
+function SystemHealth() {
+  const [checks, setChecks] = useState({ api: null, database: null });
+  const [loading, setLoading] = useState(true);
+  const [checkedAt, setCheckedAt] = useState(null);
+  async function refresh() {
+    setLoading(true);
+    const [apiResult, databaseResult] = await Promise.allSettled([
+      api.get("/health"),
+      api.get("/health/database"),
+    ]);
+    setChecks({
+      api: apiResult.status === "fulfilled" ? apiResult.value.data : { status: "error" },
+      database: databaseResult.status === "fulfilled" ? databaseResult.value.data : { status: "error" },
+    });
+    setCheckedAt(new Date());
+    setLoading(false);
+  }
+  useEffect(() => {
+    let active = true;
+    async function initialCheck() {
+      const [apiResult, databaseResult] = await Promise.allSettled([
+        api.get("/health"),
+        api.get("/health/database"),
+      ]);
+      if (!active) return;
+      setChecks({
+        api: apiResult.status === "fulfilled" ? apiResult.value.data : { status: "error" },
+        database: databaseResult.status === "fulfilled" ? databaseResult.value.data : { status: "error" },
+      });
+      setCheckedAt(new Date());
+      setLoading(false);
+    }
+    initialCheck();
+    return () => { active = false; };
+  }, []);
+  const healthy = checks.api?.status === "healthy" && checks.database?.status === "connected";
+  return <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">System Connectivity</h3><p className="mt-1 text-sm text-slate-500">Read-only API and database health checks</p></div><button onClick={refresh} disabled={loading} className="rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50">{loading ? "Checking..." : "Refresh checks"}</button></div>
+    <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">{[{ label: "FastAPI service", value: checks.api?.status || "Checking" }, { label: "MySQL database", value: checks.database?.status || "Checking" }].map((item) => <div key={item.label} className="rounded-xl bg-slate-50 p-5"><p className="text-sm text-slate-500">{item.label}</p><p className={`mt-2 text-xl font-bold ${item.value === "healthy" || item.value === "connected" ? "text-emerald-600" : item.value === "error" ? "text-red-600" : "text-slate-700"}`}>{item.value}</p></div>)}</div>
+    <p className="mt-5 text-xs text-slate-500">Last checked: {checkedAt ? checkedAt.toLocaleString() : "—"}</p>
+    {healthy && <p className="mt-3 text-sm font-medium text-emerald-700">All configured health checks are passing.</p>}
+  </section>;
+}
+
+function SkuCatalog({ items, total, page, search, onSearch, onPage }) {
+  const pageSize = 20;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-bold text-slate-900">Product Catalog</h3>
+          <p className="mt-1 text-xs text-slate-500">SKU master data and unit pricing</p>
         </div>
+        <div className="relative w-full sm:max-w-sm">
+          <Search className="absolute left-3 top-3 text-slate-400" size={17} />
+          <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search SKU or product name" className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500" />
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["SKU Code", "Product", "Category", "Unit Cost", "Unit Price", "Active"].map((heading) => <th key={heading} className="whitespace-nowrap px-5 py-4">{heading}</th>)}</tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {items.map((sku) => <tr key={sku.id} className="hover:bg-slate-50"><td className="px-5 py-4 font-semibold">{sku.sku_code}</td><td className="px-5 py-4">{sku.name}</td><td className="px-5 py-4">{sku.category}</td><td className="px-5 py-4">{sku.unit_cost}</td><td className="px-5 py-4">{sku.unit_price}</td><td className="px-5 py-4">{sku.is_active ? "Yes" : "No"}</td></tr>)}
+            {items.length === 0 && <tr><td colSpan="6" className="p-8 text-center text-slate-500">No products found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-sm">
+        <span className="text-slate-500">{total} products · Page {page} of {pages}</span>
+        <div className="flex gap-2"><button disabled={page <= 1} onClick={() => onPage(page - 1)} className="rounded-lg border px-3 py-1 disabled:opacity-40">Previous</button><button disabled={page >= pages} onClick={() => onPage(page + 1)} className="rounded-lg border px-3 py-1 disabled:opacity-40">Next</button></div>
+      </div>
+    </section>
+  );
+}
+
+function Analytics({ data }) {
+  const severityData = data?.alerts_by_severity || [];
+  const statusData = data?.alerts_by_status || [];
+  const storeData = data?.alerts_by_store || [];
+  const maxSeverity = Math.max(...severityData.map((item) => item.value), 1);
+  const maxStore = Math.max(...storeData.map((item) => item.value), 1);
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="font-bold">Alert Severity Distribution</h3><p className="mb-7 mt-1 text-xs text-slate-500">Live aggregate from all stored alerts</p>
+        <div className="space-y-6">{severityData.map((item) => { const color = { HIGH: "bg-red-500", MEDIUM: "bg-amber-500", LOW: "bg-emerald-500" }[item.name] || "bg-blue-500"; return <div key={item.name}><div className="mb-2 flex justify-between text-sm"><span className="font-medium">{item.name}</span><span className="font-bold">{item.value}</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${color}`} style={{ width: `${(item.value / maxSeverity) * 100}%` }} /></div></div>; })}{severityData.length === 0 && <p className="text-sm text-slate-500">No severity data available.</p>}</div>
+      </section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="font-bold">Alert Status Overview</h3><p className="mb-5 mt-1 text-xs text-slate-500">Current workflow status across all alerts</p>
+        <div className="space-y-3">{statusData.map((item) => <div key={item.name} className="flex items-center justify-between rounded-xl bg-slate-50 p-4"><span className="text-sm font-medium">{item.name}</span><span className="text-lg font-bold">{item.value}</span></div>)}{statusData.length === 0 && <p className="text-sm text-slate-500">No status data available.</p>}</div>
+      </section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
+        <h3 className="font-bold">Stores with Most Shrinkage Alerts</h3><p className="mb-5 mt-1 text-xs text-slate-500">Top ten stores by alert volume</p>
+        <div className="space-y-4">{storeData.map((item) => <div key={item.store_id}><div className="mb-1 flex justify-between gap-3 text-sm"><span className="truncate">{item.store_code} · {item.name}</span><strong>{item.value}</strong></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{ width: `${(item.value / maxStore) * 100}%` }} /></div></div>)}{storeData.length === 0 && <p className="text-sm text-slate-500">No store-level alert data available.</p>}</div>
       </section>
     </div>
   );
